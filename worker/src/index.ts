@@ -1051,23 +1051,16 @@ if (req.method === "POST" && path === "/api/stripe/webhook") {
         return json({ ok: true }, headers);
       }
 
-      // ===== END PART 1/3 =====
-      // Part 2 starts with: Admin Orders/Reviews/Fulfill/Refund/Review-Request/Contact/Cron + Not found
-      return json({ ok: false, error: "Not found" }, headers, 404);
-    } catch (e: any) {
-      return json({ ok: false, error: String(e?.message || e) }, headers, 500);
-    }
-  },
-};
-
-// =====================================================
+      // =====================================================
 // PART 2/3
 // Admin Orders / Reviews / Fulfillment / Refunds
 // Review Requests (manual + cron)
 // Contact form
 // Not Found
 // =====================================================
-try {
+
+
+  
 // =====================================================
 // Admin: GET orders (paid only)
 // GET /api/admin/orders?limit=20&offset=0&q=...
@@ -1335,17 +1328,14 @@ if (req.method === "POST" && path === "/api/contact") {
 
   return json({ ok: true }, headers);
 }
-
-
-// =====================================================
-// Not found
-// =====================================================
-return json({ ok: false, error: "Not found" }, headers, 404);
+      return json({ ok: false, error: "Not found" }, headers, 404);
     } catch (e: any) {
       return json({ ok: false, error: String(e?.message || e) }, headers, 500);
     }
   },
 };
+
+
 
 // =====================================================
 // Helpers
