@@ -1067,14 +1067,7 @@ if (req.method === "POST" && path === "/api/stripe/webhook") {
 // Contact form
 // Not Found
 // =====================================================
-// =====================================================
-// PART 2/3
-// Admin Orders / Reviews / Fulfillment / Refunds
-// Review Requests (manual + cron)
-// Contact form
-// Not Found
-// =====================================================
-
+try {
 // =====================================================
 // Admin: GET orders (paid only)
 // GET /api/admin/orders?limit=20&offset=0&q=...
@@ -1348,14 +1341,6 @@ if (req.method === "POST" && path === "/api/contact") {
 // Not found
 // =====================================================
 return json({ ok: false, error: "Not found" }, headers, 404);
-
-// ===== END PART 2/3 =====
-// =====================================================
-// PART 3/3
-// Closing braces + Helpers + Stripe + Emails + Tokens + HTML + Escapes
-// =====================================================
-
-// ===== CONTINUE FROM END OF PART 2/3 =====
     } catch (e: any) {
       return json({ ok: false, error: String(e?.message || e) }, headers, 500);
     }
