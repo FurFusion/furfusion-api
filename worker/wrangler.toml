@@ -1,6 +1,6 @@
 name = "furfusion-api"
 main = "src/index.ts"
-compatibility_date = "2025-01-01"
+compatibility_date = "2026-02-12"
 
 [vars]
 SITE_URL = "https://fur-fusion.com"
