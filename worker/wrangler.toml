@@ -1,0 +1,16 @@
+name = "furfusion-api"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[vars]
+SITE_URL = "https://fur-fusion.com"
+FROM_EMAIL = "FurFusion <support@fur-fusion.com>"
+STRIPE_PRICE_ID = "price_1Sqt30AeTSG2655IHy2ZX5AO"
+ADMIN_EMAIL = "fur.fusion94@gmail.com"
+CF_IMAGES_ACCOUNT_ID = "48fd30d6040399395b789539f60197b4"
+
+
+[[d1_databases]]
+binding = "DB"
+database_name = "furfusion_db"
+database_id = "932fbf22-9696-4750-8130-686deefe2365"
