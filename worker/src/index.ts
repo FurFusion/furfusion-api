@@ -5,7 +5,6 @@
 // Checkout + Webhook (stub entrypoint), Public Blogs + Admin Blogs
 // =====================================================
 
-console.log("PATH:", path);
 
 export interface Env {
   DB: D1Database;
@@ -108,24 +107,27 @@ function normalizeBlogContent(input: any): BlogContent {
 
   return { excerpt, coverImage, coverAlt, blocks };
 }
-
+  
 // =====================================================
 // Worker
 // =====================================================
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
-    const headers = cors(req);
-
-    // Preflight
-    if (req.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers });
-    }
-
-    try {
-      if (!env.DB) return json({ ok: false, error: "DB binding missing" }, headers, 500);
-
-      const url = new URL(req.url);
-      const path = url.pathname;
+    const headers = { "Content-Type": "application/json", ...cors(req) }; 
+    
+    // Preflight 
+   if (req.method === "OPTIONS") { 
+    return new Response(null, { status: 204, headers }); 
+  } 
+  try {
+  if (!env.DB) {return json({ ok: false, error: "DB binding missing" }, headers, 500); 
+  }
+  
+  const url = new URL(req.url); 
+  const path = url.pathname; 
+  
+  console.log("PATH:", path)
 
       // ---------------------
       // Health
@@ -154,391 +156,286 @@ export default {
         );
       }
       
-
+   
 // =====================================================
 // Admin: Analytics – Sales & Orders
 // GET /api/admin/analytics/sales?range=7d
 // Cloudflare Access protected
 // =====================================================
-if (req.method === "GET" && path.endsWith("/analytics/sales")) {
-  const email = getAccessEmail(req);
-  if (!email || !isAdmin(req, env)) return json({ ok: false, error: "Unauthorized" }, headers, 401);
+  if (req.method === "GET" && path.endsWith("/analytics/sales")) {
+    const email = getAccessEmail(req);
+    if (!email || !isAdmin(req, env)) {
+      return json({ ok: false, error: "Unauthorized" }, headers, 401);
+    }
 
-  const range = url.searchParams.get("range") || "7d";
-  let daysLimit: number | null = null;
-  
-  // Mapping ranges to days
-  if (range === "today") daysLimit = 1;
-  else if (range === "7d") daysLimit = 7;
-  else if (range === "30d") daysLimit = 30;
-  else if (range === "all") daysLimit = null;
+    const range = url.searchParams.get("range") || "7d";
+    let daysLimit: number | null = null;
 
-  // We use DATE() instead of DATETIME() for better compatibility with string dates
-  const dateFilter = daysLimit 
-    ? `AND date(created_at) >= date('now', '-${daysLimit} days')` 
-    : "";
+    // Mapping ranges to days
+    if (range === "today") daysLimit = 1;
+    else if (range === "7d") daysLimit = 7;
+    else if (range === "30d") daysLimit = 30;
+    else if (range === "all") daysLimit = null;
 
-  const { results } = await env.DB.prepare(`
-    SELECT 
-      DATE(created_at) as day, 
-      COUNT(*) as orders, 
-      SUM(total) as revenue
-    FROM orders 
-    WHERE payment_status = 'paid'
-    ${dateFilter}
-    GROUP BY day 
-    ORDER BY day ASC
-  `).all();
+    // We use DATE() instead of DATETIME() for better compatibility with string dates
+    const dateFilter = daysLimit 
+      ? `AND date(created_at) >= date('now', '-${daysLimit} days')` 
+      : "";
 
-  return json({
-    ok: true,
-    range,
-    data: (results || []).map((r: any) => ({
-      day: r.day,
-      orders: Number(r.orders) || 0,
-      // REMOVED the /100 because your revenue is already in dollars (7193.43)
-      revenue: Number(r.revenue) || 0 
-    })),
-  }, headers);
-}
+    const { results } = await env.DB.prepare(`
+      SELECT 
+        DATE(created_at) as day, 
+        COUNT(*) as orders, 
+        SUM(total) as revenue
+      FROM orders 
+      WHERE payment_status = 'paid'
+      ${dateFilter}
+      GROUP BY day 
+      ORDER BY day ASC
+    `).all();
 
+    return json({
+      ok: true,
+      range,
+      data: (results || []).map((r: any) => ({
+        day: r.day,
+        orders: Number(r.orders) || 0,
+        revenue: Number(r.revenue) || 0 
+      })),
+    }, headers);
+  }
+   
 // =====================================================
 // Public: Track page view
 // POST /api/track
 // Body: { referrer?, path? }
 // =====================================================
-if (req.method === "POST" && path.endsWith("/track")) {
-  const body = await req.json().catch(() => ({})) as any;
-  const pagePath = String(body.path || "/").slice(0, 500);
-  const referrer = String(body.referrer || "").slice(0, 1000);
-  const ua = req.headers.get("User-Agent") || "";
-  const ip = req.headers.get("CF-Connecting-IP") || "";
-  const country = req.headers.get("CF-IPCountry") || "";
-  const city = req.headers.get("CF-IPCity") || "";
+  if (req.method === "POST" && path.endsWith("/track")) {
+    const body = await req.json().catch(() => ({})) as any;
+    const pagePath = String(body.path || "/").slice(0, 500);
+    const referrer = String(body.referrer || "").slice(0, 1000);
+    const ua = req.headers.get("User-Agent") || "";
+    const ip = req.headers.get("CF-Connecting-IP") || "";
+    const country = req.headers.get("CF-IPCountry") || "";
+    const city = req.headers.get("CF-IPCity") || "";
 
-  // Determine source from referrer (filter out same-site referrers)
-  let source = "direct";
-  if (referrer) {
-    const ref = referrer.toLowerCase();
-    // Ignore same-site referrers (SPA navigation)
-    const isSameSite = ref.includes("fur-fusion.com") || ref.includes("furfusion") || ref.includes("lovableproject.com") || ref.includes("lovable.app") || ref.includes("localhost");
-    if (!isSameSite) {
-      if (ref.includes("google") || ref.includes("bing") || ref.includes("yahoo") || ref.includes("duckduckgo") || ref.includes("baidu")) {
-        source = "search";
-      } else if (ref.includes("facebook") || ref.includes("instagram") || ref.includes("tiktok") || ref.includes("twitter") || ref.includes("youtube") || ref.includes("pinterest") || ref.includes("snapchat") || ref.includes("reddit") || ref.includes("t.co")) {
-        source = "social";
-      } else {
-        source = "referral";
+    // Determine source from referrer (filter out same-site referrers)
+    let source = "direct";
+    if (referrer) {
+      const ref = referrer.toLowerCase();
+      const isSameSite =
+        ref.includes("fur-fusion.com") ||
+        ref.includes("furfusion") ||
+        ref.includes("lovableproject.com") ||
+        ref.includes("lovable.app") ||
+        ref.includes("localhost");
+
+      if (!isSameSite) {
+        if (ref.includes("google") || ref.includes("bing") || ref.includes("yahoo") || ref.includes("duckduckgo") || ref.includes("baidu")) {
+          source = "search";
+        } else if (
+          ref.includes("facebook") ||
+          ref.includes("instagram") ||
+          ref.includes("tiktok") ||
+          ref.includes("twitter") ||
+          ref.includes("youtube") ||
+          ref.includes("pinterest") ||
+          ref.includes("snapchat") ||
+          ref.includes("reddit") ||
+          ref.includes("t.co")
+        ) {
+          source = "social";
+        } else {
+          source = "referral";
+        }
       }
     }
-  }
 
-  // Generate a simple session hash from IP + UA + date (privacy-friendly, no cookies)
-  const dayStr = new Date().toISOString().slice(0, 10);
-  const sessionRaw = `${ip}|${ua}|${dayStr}`;
-  const sessionHash = await hashString(sessionRaw);
+    // Generate a simple session hash from IP + UA + date (privacy-friendly, no cookies)
+    const dayStr = new Date().toISOString().slice(0, 10);
+    const sessionRaw = `${ip}|${ua}|${dayStr}`;
+    const sessionHash = await hashString(sessionRaw);
 
-  try {
-    await env.DB.prepare(
-      `INSERT INTO page_views (path, referrer, source, country, city, session_hash, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
-    ).bind(pagePath, referrer, source, country, city, sessionHash).run();
-  } catch (e: any) {
-    // Table might not exist yet - create it
-    if (e.message?.includes("no such table")) {
-      await env.DB.prepare(`
-        CREATE TABLE IF NOT EXISTS page_views (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          path TEXT NOT NULL DEFAULT '/',
-          referrer TEXT DEFAULT '',
-          source TEXT DEFAULT 'direct',
-          country TEXT DEFAULT '',
-          city TEXT DEFAULT '',
-          session_hash TEXT DEFAULT '',
-          created_at TEXT DEFAULT (datetime('now'))
-        )
-      `).run();
+    try {
       await env.DB.prepare(
         `INSERT INTO page_views (path, referrer, source, country, city, session_hash, created_at)
          VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
       ).bind(pagePath, referrer, source, country, city, sessionHash).run();
+    } catch (e: any) {
+      // Table might not exist yet - create it
+      if (e.message?.includes("no such table")) {
+        await env.DB.prepare(`
+          CREATE TABLE IF NOT EXISTS page_views (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path TEXT NOT NULL DEFAULT '/',
+            referrer TEXT DEFAULT '',
+            source TEXT DEFAULT 'direct',
+            country TEXT DEFAULT '',
+            city TEXT DEFAULT '',
+            session_hash TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now'))
+          )
+        `).run();
+
+        await env.DB.prepare(
+          `INSERT INTO page_views (path, referrer, source, country, city, session_hash, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
+        ).bind(pagePath, referrer, source, country, city, sessionHash).run();
+      } else {
+        throw e;
+      }
     }
+
+    return json({ ok: true }, headers);
   }
 
-  return json({ ok: true }, headers);
-}
 
 // =====================================================
 // Admin: Analytics – Visitors & Page Views
 // GET /api/admin/analytics/visitors?range=7d
 // =====================================================
-if (req.method === "GET" && path.endsWith("/analytics/visitors")) {
-  const email =
-    req.headers.get("Cf-Access-Authenticated-User-Email") ||
-    req.headers.get("cf-access-authenticated-user-email");
-  if (!email) return json({ ok: false, error: "Unauthorized" }, headers, 401);
 
-  const range = url.searchParams.get("range") || "7d";
-  let daysLimit: number | null = null;
-  switch (range) {
-    case "today": daysLimit = 1; break;
-    case "7d":    daysLimit = 7; break;
-    case "30d":   daysLimit = 30; break;
-    case "90d":   daysLimit = 90; break;
-    case "180d":  daysLimit = 180; break;
-    case "all":   daysLimit = null; break;
-    default: return json({ ok: false, error: "Invalid range" }, headers, 400);
+  if (req.method === "GET" && path.endsWith("/analytics/visitors")) {
+    const email =
+      req.headers.get("Cf-Access-Authenticated-User-Email") ||
+      req.headers.get("cf-access-authenticated-user-email");
+
+    if (!email) return json({ ok: false, error: "Unauthorized" }, headers, 401);
+
+    const range = url.searchParams.get("range") || "7d";
+    let daysLimit: number | null = null;
+
+    switch (range) {
+      case "today":
+        daysLimit = 1;
+        break;
+      case "7d":
+        daysLimit = 7;
+        break;
+      case "30d":
+        daysLimit = 30;
+        break;
+      case "90d":
+        daysLimit = 90;
+        break;
+      case "180d":
+        daysLimit = 180;
+        break;
+      case "all":
+        daysLimit = null;
+        break;
+      default:
+        return json({ ok: false, error: "Invalid range" }, headers, 400);
+    }
+
+    const dateFilter = daysLimit
+      ? `WHERE datetime(created_at) >= datetime('now', '-${daysLimit} days')`
+      : "";
+
+    try {
+      // Daily breakdown
+      const { results: daily } = await env.DB.prepare(`
+        SELECT DATE(created_at) as day,
+               COUNT(*) as page_views,
+               COUNT(DISTINCT session_hash) as sessions
+        FROM page_views
+        ${dateFilter}
+        GROUP BY day ORDER BY day ASC
+      `).all();
+
+      // By source
+      const { results: bySrc } = await env.DB.prepare(`
+        SELECT source, COUNT(*) as views, COUNT(DISTINCT session_hash) as sessions
+        FROM page_views
+        ${dateFilter}
+        GROUP BY source ORDER BY views DESC
+      `).all();
+
+      // By country
+      const { results: byCountry } = await env.DB.prepare(`
+        SELECT country, COUNT(*) as views, COUNT(DISTINCT session_hash) as sessions
+        FROM page_views
+        ${dateFilter}
+        GROUP BY country ORDER BY views DESC LIMIT 20
+      `).all();
+
+      // By city
+      const { results: byCity } = await env.DB.prepare(`
+        SELECT city, country, COUNT(*) as views, COUNT(DISTINCT session_hash) as sessions
+        FROM page_views
+        ${dateFilter}
+        GROUP BY city, country ORDER BY views DESC LIMIT 20
+      `).all();
+
+      return json({
+        ok: true,
+        range,
+        daily: (daily || []).map((r: any) => ({
+          day: r.day,
+          page_views: Number(r.page_views) || 0,
+          sessions: Number(r.sessions) || 0,
+        })),
+        by_source: (bySrc || []).map((r: any) => ({
+          source: r.source || "direct",
+          views: Number(r.views) || 0,
+          sessions: Number(r.sessions) || 0,
+        })),
+        by_country: (byCountry || []).map((r: any) => ({
+          country: r.country || "Unknown",
+          views: Number(r.views) || 0,
+          sessions: Number(r.sessions) || 0,
+        })),
+        by_city: (byCity || []).map((r: any) => ({
+          city: r.city || "Unknown",
+          country: r.country || "",
+          views: Number(r.views) || 0,
+          sessions: Number(r.sessions) || 0,
+        })),
+      }, headers);
+    } catch (e: any) {
+      // If table doesn't exist yet, return empty analytics
+      return json({
+        ok: true,
+        range,
+        daily: [],
+        by_source: [],
+        by_country: [],
+        by_city: [],
+      }, headers);
+    }
   }
-
-  const dateFilter = daysLimit
-    ? `WHERE datetime(created_at) >= datetime('now', '-${daysLimit} days')`
-    : "";
-
-  try {
-    // Daily breakdown
-    const { results: daily } = await env.DB.prepare(`
-      SELECT DATE(created_at) as day,
-             COUNT(*) as page_views,
-             COUNT(DISTINCT session_hash) as sessions
-      FROM page_views
-      ${dateFilter}
-      GROUP BY day ORDER BY day ASC
-    `).all();
-
-    // By source
-    const { results: bySrc } = await env.DB.prepare(`
-      SELECT source, COUNT(*) as views, COUNT(DISTINCT session_hash) as sessions
-      FROM page_views
-      ${dateFilter}
-      GROUP BY source ORDER BY views DESC
-    `).all();
-
-    // By country
-    const { results: byCountry } = await env.DB.prepare(`
-      SELECT country, COUNT(*) as views, COUNT(DISTINCT session_hash) as sessions
-      FROM page_views
-      ${dateFilter}
-      GROUP BY country ORDER BY views DESC LIMIT 20
-    `).all();
-
-    // By city
-    const { results: byCity } = await env.DB.prepare(`
-      SELECT city, country, COUNT(*) as views, COUNT(DISTINCT session_hash) as sessions
-      FROM page_views
-      ${dateFilter}
-      GROUP BY city, country ORDER BY views DESC LIMIT 20
-    `).all();
-
-    return json({
-      ok: true,
-      range,
-      daily: (daily || []).map((r: any) => ({
-        day: r.day,
-        page_views: Number(r.page_views) || 0,
-        sessions: Number(r.sessions) || 0,
-      })),
-      by_source: (bySrc || []).map((r: any) => ({
-        source: r.source || "direct",
-        views: Number(r.views) || 0,
-        sessions: Number(r.sessions) || 0,
-      })),
-      by_country: (byCountry || []).map((r: any) => ({
-        country: r.country || "Unknown",
-        views: Number(r.views) || 0,
-        sessions: Number(r.sessions) || 0,
-      })),
-      by_city: (byCity || []).map((r: any) => ({
-        city: r.city || "Unknown",
-        country: r.country || "",
-        views: Number(r.views) || 0,
-        sessions: Number(r.sessions) || 0,
-      })),
-    }, headers);
-  } catch (e: any) {
-    // Table might not exist yet
-    return json({
-      ok: true,
-      range,
-      daily: [],
-      by_source: [],
-      by_country: [],
-      by_city: [],
-    }, headers);
-  }
-}
-
       // =====================================================
-      // ✅ Public: GET reviews summary (ALL approved reviews)
-      // GET /api/reviews/summary
-      // - This MUST NOT depend on the "loaded reviews"
-      // =====================================================
-      if (req.method === "GET" && path === "/api/reviews/summary") {
-        const totalRow = await env.DB.prepare(
-          `SELECT COUNT(*) as total, AVG(rating) as avg
-           FROM reviews
-           WHERE status='approved'`
-        ).first();
-
-        const { results } = await env.DB.prepare(
-          `SELECT rating, COUNT(*) as c
-           FROM reviews
-           WHERE status='approved'
-           GROUP BY rating`
-        ).all();
-
-        const breakdown: Record<1 | 2 | 3 | 4 | 5, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-
-        for (const row of results || []) {
-          const r = Number((row as any).rating);
-          const c = Number((row as any).c) || 0;
-          if (r >= 1 && r <= 5) breakdown[r as 1 | 2 | 3 | 4 | 5] = c;
-        }
-
-        return json(
-          {
-            ok: true,
-            total: Number((totalRow as any)?.total) || 0,
-            average: Number((totalRow as any)?.avg) || 0,
-            breakdown,
-          },
-          headers
-        );
-      }
-
-      // =====================================================
-      // ✅ Public: GET approved reviews (PAGINATED)
-      // GET /api/reviews?limit=10&offset=0&rating=5
-      // - Default limit: 10
-      // - Max limit: 50 (safe)
-      // =====================================================
-      if (req.method === "GET" && path === "/api/reviews") {
-        const limit = clampInt(url.searchParams.get("limit"), 10, 1, 50);
-        const offset = clampInt(url.searchParams.get("offset"), 0, 0, 10000000);
-        const rating = clampInt(url.searchParams.get("rating"), 0, 0, 5);
-
-        let sql = `
-          SELECT id, name, rating, text, created_at, images_json
-          FROM reviews
-          WHERE status='approved'
-        `;
-        const params: any[] = [];
-
-        if (rating >= 1 && rating <= 5) {
-          sql += " AND rating = ?";
-          params.push(rating);
-        }
-
-        sql += " ORDER BY datetime(created_at) DESC LIMIT ? OFFSET ?";
-        params.push(limit, offset);
-
-        const { results } = await env.DB.prepare(sql).bind(...params).all();
-
-        return json(
-          {
-            ok: true,
-            reviews: (results || []).map((r: any) => ({
-              id: String(r.id),
-              author: String(r.name || ""),
-              rating: Number(r.rating) || 5,
-              text: String(r.text || ""),
-              verified: true,
-              created_at: r.created_at,
-              images: safeJsonArray(r.images_json),
-            })),
-          },
-          headers
-        );
-      }
-
-      // =====================================================
-      // Public: POST submit review (website form)
-      // POST /api/reviews
-      // body: { order_id,email,name,rating,text }
-      // NOTE: no uploads here
-      // =====================================================
-      if (req.method === "POST" && path === "/api/reviews") {
-        if (!requireJson(req)) {
-          return json({ ok: false, error: "Content-Type must be application/json" }, headers, 400);
-        }
-
-        const body = await req.json().catch(() => null);
-        if (!body) return json({ ok: false, error: "Invalid JSON body" }, headers, 400);
-
-        const order_id = String(body.order_id || "").trim();
-        const email = String(body.email || "").trim().toLowerCase();
-        const name = String(body.name || "").trim();
-        const rating = clampInt(body.rating, 0, 1, 5);
-        const text = String(body.text || "").trim();
-        const images_json = "[]";
-
-        if (!order_id || !email || !name || !rating) {
-          return json(
-            { ok: false, error: "Missing required fields (order_id, email, name, rating)" },
-            headers,
-            400
-          );
-        }
-
-        const order = await env.DB.prepare(
-          `SELECT email, payment_status, fulfillment_status
-           FROM orders
-           WHERE order_id = ?`
-        )
-          .bind(order_id)
-          .first();
-
-        if (!order) return json({ ok: false, error: "Invalid Order ID" }, headers, 400);
-        if (String(order.email || "").toLowerCase() !== email) {
-          return json({ ok: false, error: "Email does not match this Order ID" }, headers, 400);
-        }
-        if (String(order.payment_status || "") !== "paid") {
-          return json({ ok: false, error: "Order not paid" }, headers, 400);
-        }
-        if (
-          !["approved", "fulfilled"].includes(
-            String(order.fulfillment_status || "").toLowerCase()
-          )
-        ) {
-          return json({ ok: false, error: "Order not approved for reviews yet" }, headers, 400);
-        }
-
-        const existing = await env.DB.prepare(`SELECT id FROM reviews WHERE order_id = ?`)
-          .bind(order_id)
-          .first();
-
-        if (existing) {
-          return json({ ok: false, error: "Review already exists for this Order ID" }, headers, 409);
-        }
-
-        await env.DB.prepare(
-          `INSERT INTO reviews (order_id, email, name, rating, text, status, images_json)
-           VALUES (?, ?, ?, ?, ?, 'pending', ?)`
-        )
-          .bind(order_id, email, name, rating, text, images_json)
-          .run();
-
-        return json({ ok: true, message: "Review submitted for approval" }, headers);
-      }
-// =====================================================
-// Public: GET reviews summary (ALL approved reviews)
+// ✅ Public: GET reviews summary (ALL approved reviews)
 // GET /api/reviews/summary
+// - This MUST NOT depend on the "loaded reviews"
 // =====================================================
-if (req.method === "GET" && path === "/api/reviews/summary") {
-  const totalRow = await env.DB.prepare(
-    `SELECT COUNT(*) as total, AVG(rating) as avg
-     FROM reviews
-     WHERE status='approved'`
-  ).first();
 
-  const { results } = await env.DB.prepare(
-    `SELECT rating, COUNT(*) as c
-     FROM reviews
-     WHERE status='approved'
-     GROUP BY rating`
-  ).all();
+  if (req.method === "GET" && path === "/api/reviews/summary") {
+  const productId = String(url.searchParams.get("product_id") || "").trim();
+
+  let sqlTotal = `
+    SELECT COUNT(*) as total, AVG(rating) as avg
+    FROM reviews
+    WHERE status='approved'
+  `;
+  let sqlBreakdown = `
+    SELECT rating, COUNT(*) as c
+    FROM reviews
+    WHERE status='approved'
+    GROUP BY rating
+  `;
+  const params: any[] = [];
+
+  if (productId) {
+    sqlTotal += " AND product_id = ?";
+    sqlBreakdown += " AND product_id = ?";
+    params.push(productId);
+  }
+
+  const totalRow = await env.DB.prepare(sqlTotal).bind(...params).first();
+  const { results } = await env.DB.prepare(sqlBreakdown).bind(...params).all();
 
   const breakdown: Record<1 | 2 | 3 | 4 | 5, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-
   for (const row of results || []) {
     const r = Number((row as any).rating);
     const c = Number((row as any).c) || 0;
@@ -552,37 +449,145 @@ if (req.method === "GET" && path === "/api/reviews/summary") {
       average: Number((totalRow as any)?.avg) || 0,
       breakdown,
     },
-    { ...headers, "Cache-Control": "no-store" }
+    headers
   );
-          }
-      
-      // =====================================================
-      // Public: GET order
-      // GET /api/orders/:order_id
-      // =====================================================
-      if (req.method === "GET" && path.startsWith("/api/orders/")) {
-        const id = decodeURIComponent(path.split("/").pop() || "").trim();
-        if (!id) return json({ ok: false, error: "Missing order_id" }, headers, 400);
+}
+  // =====================================================
+  // ✅ Public: GET approved reviews (PAGINATED)
+  // GET /api/reviews?limit=10&offset=0&rating=5
+  // =====================================================
 
-        const order = await env.DB.prepare(
-  `SELECT
-     order_id,
-     email,
-     payment_status,
-     fulfillment_status,
-     tracking_number,
-     quantity,
-     created_at
-   FROM orders
-   WHERE order_id = ?`
-)
-  .bind(id)
-  .first();
+  if (req.method === "GET" && path === "/api/reviews") {
+    const limit = clampInt(url.searchParams.get("limit"), 10, 1, 50);
+    const offset = clampInt(url.searchParams.get("offset"), 0, 0, 10000000);
+    const rating = clampInt(url.searchParams.get("rating"), 0, 0, 5);
+    const productId = String(url.searchParams.get("product_id") || "").trim();
 
+    let sql = `
+      SELECT id, product_id, name, rating, text, created_at, images_json
+      FROM reviews
+      WHERE status='approved'
+    `;
+    const params: any[] = [];
+    if (rating >= 1 && rating <= 5) {
+      sql += " AND rating = ?";
+      params.push(rating);
+    }
+    if (productId) {
+      sql += " AND product_id = ?";
+      params.push(productId);
+    }
+    sql += " ORDER BY datetime(created_at) DESC LIMIT ? OFFSET ?";
+    params.push(limit, offset);
 
-        if (!order) return json({ ok: false, error: "Not found" }, headers, 404);
-        return json({ ok: true, order }, headers);
-      }
+    const { results } = await env.DB.prepare(sql).bind(...params).all();
+
+    return json(
+      {
+        ok: true,
+        reviews: (results || []).map((r: any) => ({
+          id: String(r.id),
+          author: String(r.name || ""),
+          rating: Number(r.rating) || 5,
+          text: String(r.text || ""),
+          verified: true,
+          created_at: r.created_at,
+          images: safeJsonArray(r.images_json),
+        })),
+      },
+      headers
+    );
+  }
+
+  // =====================================================
+  // Public: POST submit review
+  // POST /api/reviews
+  // =====================================================
+
+  if (req.method === "POST" && path === "/api/reviews") {
+    if (!requireJson(req)) {
+      return json({ ok: false, error: "Content-Type must be application/json" }, headers, 400);
+    }
+
+    const body = await req.json().catch(() => null);
+    if (!body) return json({ ok: false, error: "Invalid JSON body" }, headers, 400);
+
+    const order_id = String(body.order_id || "").trim();
+    const email = String(body.email || "").trim().toLowerCase();
+    const name = String(body.name || "").trim();
+    const rating = clampInt(body.rating, 0, 1, 5);
+    const text = String(body.text || "").trim();
+    const images_json = "[]";
+
+    if (!order_id || !email || !name || !rating) {
+      return json(
+        { ok: false, error: "Missing required fields (order_id, email, name, rating)" },
+        headers,
+        400
+      );
+    }
+
+    const order = await env.DB.prepare(
+      `SELECT email, payment_status, fulfillment_status, product_id
+       FROM orders
+       WHERE order_id = ?`
+    ).bind(order_id).first();
+
+    if (!order) return json({ ok: false, error: "Invalid Order ID" }, headers, 400);
+    if (String(order.email || "").toLowerCase() !== email) {
+      return json({ ok: false, error: "Email does not match this Order ID" }, headers, 400);
+    }
+    if (String(order.payment_status || "") !== "paid") {
+      return json({ ok: false, error: "Order not paid" }, headers, 400);
+    }
+    if (!["approved", "fulfilled"].includes(String(order.fulfillment_status || "").toLowerCase())) {
+      return json({ ok: false, error: "Order not approved for reviews yet" }, headers, 400);
+    }
+
+    const existing = await env.DB.prepare(`SELECT id FROM reviews WHERE order_id = ?`)
+      .bind(order_id)
+      .first();
+
+    if (existing) {
+      return json({ ok: false, error: "Review already exists for this Order ID" }, headers, 409);
+    }
+
+    await env.DB.prepare(
+      `INSERT INTO reviews (order_id, product_id, email, name, rating, text, status, images_json)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?)`
+    ).bind(order_id, order.product_id, email, name, rating, text, images_json).run();
+
+    return json({ ok: true, message: "Review submitted for approval" }, headers);
+  }
+
+  // =====================================================
+  // Public: GET order
+  // GET /api/orders/:order_id
+  // =====================================================
+
+  if (req.method === "GET" && path.startsWith("/api/orders/")) {
+    const id = decodeURIComponent(path.split("/").pop() || "").trim();
+    if (!id) return json({ ok: false, error: "Missing order_id" }, headers, 400);
+
+    const order = await env.DB.prepare(
+      `SELECT
+  order_id,
+  product_id,
+  email,
+  payment_status,
+  fulfillment_status,
+  tracking_number,
+  quantity,
+  created_at
+FROM orders
+WHERE order_id = ?`
+    ).bind(id).first();
+
+    if (!order) return json({ ok: false, error: "Not found" }, headers, 404);
+
+    return json({ ok: true, order }, headers);
+  }
+
 
       // =====================================================
       // =====================================================
@@ -993,7 +998,7 @@ if (req.method === "POST" && path === "/api/stripe/webhook") {
           return json({ ok: false, error: String(e?.message || e) }, headers, 400);
         }
       }
-
+        
       // PATCH / DELETE by id
       if (
         (req.method === "PATCH" || req.method === "DELETE") &&
@@ -1074,19 +1079,19 @@ if (req.method === "GET" && path === "/api/admin/orders") {
 
   let sql = `
     SELECT
-      order_id, email, full_name, phone,
-      address1, address2, city, state, zip, country,
-      billing_address1, billing_address2, billing_city,
-      billing_state, billing_zip, billing_country,
-      payment_status, fulfillment_status,
-      tracking_number, total, quantity, created_at,
-      invoice_status, invoice_sent_at,
-      stripe_payment_intent_id,
-      stripe_invoice_pdf_url, stripe_hosted_invoice_url,
-      approved_at, review_request_sent_at,
-      review_request_disabled
-    FROM orders
-    WHERE payment_status='paid'
+  order_id, product_id, email, full_name, phone,
+  address1, address2, city, state, zip, country,
+  billing_address1, billing_address2, billing_city,
+  billing_state, billing_zip, billing_country,
+  payment_status, fulfillment_status,
+  tracking_number, total, quantity, created_at,
+  invoice_status, invoice_sent_at,
+  stripe_payment_intent_id,
+  stripe_invoice_pdf_url, stripe_hosted_invoice_url,
+  approved_at, review_request_sent_at,
+  review_request_disabled
+FROM orders
+WHERE payment_status='paid'
   `;
   const params: any[] = [];
 
@@ -1309,6 +1314,132 @@ if (req.method === "POST" && path === "/api/admin/send-review-request") {
 }
 
 // =====================================================
+// Public: GET products
+// GET /api/products
+// =====================================================
+if (req.method === "GET" && path === "/api/products") {
+  const { results } = await env.DB.prepare(`
+    SELECT id, name, description, price_cents, original_price_cents,
+           currency, is_active, created_at, main_image, gallery_images,
+           inventory, whats_included, about_item, faq, hero_images
+    FROM products
+    ORDER BY datetime(created_at) DESC
+  `).all();
+
+  return json({ ok: true, products: results || [] }, headers);
+}
+
+// =====================================================
+// Public: GET single product
+// GET /api/products/:id
+// =====================================================
+if (req.method === "GET" && path.startsWith("/api/products/")) {
+  const id = decodeURIComponent(path.split("/").pop() || "").trim();
+  if (!id) return json({ ok: false, error: "Missing product id" }, headers, 400);
+
+  const product = await env.DB.prepare(`
+    SELECT id, name, description, price_cents, original_price_cents,
+           currency, is_active, created_at, main_image, gallery_images,
+           inventory, whats_included, about_item, faq, hero_images
+    FROM products
+    WHERE id = ?
+  `).bind(id).first();
+
+  if (!product) return json({ ok: false, error: "Not found" }, headers, 404);
+
+  return json({ ok: true, product }, headers);
+}
+
+// =====================================================
+// Admin: POST create product
+// POST /api/products
+// =====================================================
+if (req.method === "POST" && path === "/api/products") {
+  if (!isAdmin(req, env)) return json({ ok: false, error: "Unauthorized" }, headers, 401);
+  if (!requireJson(req)) return json({ ok: false, error: "Content-Type must be application/json" }, headers, 400);
+
+  const body = await req.json().catch(() => null);
+  if (!body) return json({ ok: false, error: "Invalid JSON body" }, headers, 400);
+
+  const id = crypto.randomUUID();
+  await env.DB.prepare(`
+    INSERT INTO products (id, name, description, price_cents, original_price_cents,
+                          currency, main_image, gallery_images, inventory,
+                          whats_included, about_item, faq, hero_images)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    id,
+    body.name,
+    body.description,
+    body.price_cents,
+    body.original_price_cents,
+    body.currency || "USD",
+    body.main_image,
+    JSON.stringify(body.gallery_images || []),
+    body.inventory || 0,
+    JSON.stringify(body.whats_included || []),
+    JSON.stringify(body.about_item || []),
+    JSON.stringify(body.faq || []),
+    JSON.stringify(body.hero_images || [])
+  ).run();
+
+  return json({ ok: true, product_id: id }, headers);
+}
+
+// =====================================================
+// Admin: PUT update product
+// PUT /api/products/:id
+// =====================================================
+if (req.method === "PUT" && path.startsWith("/api/products/")) {
+  if (!isAdmin(req, env)) return json({ ok: false, error: "Unauthorized" }, headers, 401);
+  if (!requireJson(req)) return json({ ok: false, error: "Content-Type must be application/json" }, headers, 400);
+
+  const id = decodeURIComponent(path.split("/").pop() || "").trim();
+  const body = await req.json().catch(() => null);
+  if (!id || !body) return json({ ok: false, error: "Invalid request" }, headers, 400);
+
+  await env.DB.prepare(`
+    UPDATE products
+    SET name=?, description=?, price_cents=?, original_price_cents=?,
+        currency=?, main_image=?, gallery_images=?, inventory=?,
+        whats_included=?, about_item=?, faq=?, hero_images=?
+    WHERE id=?
+  `).bind(
+    body.name,
+    body.description,
+    body.price_cents,
+    body.original_price_cents,
+    body.currency || "USD",
+    body.main_image,
+    JSON.stringify(body.gallery_images || []),
+    body.inventory || 0,
+    JSON.stringify(body.whats_included || []),
+    JSON.stringify(body.about_item || []),
+    JSON.stringify(body.faq || []),
+    JSON.stringify(body.hero_images || []),
+    id
+  ).run();
+
+  return json({ ok: true }, headers);
+}
+
+// =====================================================
+// Admin: DELETE product
+// DELETE /api/products/:id
+// =====================================================
+if (req.method === "DELETE" && path.startsWith("/api/products/")) {
+  if (!isAdmin(req, env)) return json({ ok: false, error: "Unauthorized" }, headers, 401);
+
+  const id = decodeURIComponent(path.split("/").pop() || "").trim();
+  if (!id) return json({ ok: false, error: "Missing product id" }, headers, 400);
+
+  await env.DB.prepare(`DELETE FROM products WHERE id=?`).bind(id).run();
+
+  return json({ ok: true }, headers);
+}
+
+
+// =====================================================
 // Public: Contact form
 // POST /api/contact
 // =====================================================
@@ -1329,12 +1460,12 @@ if (req.method === "POST" && path === "/api/contact") {
   return json({ ok: true }, headers);
 }
       return json({ ok: false, error: "Not found" }, headers, 404);
-    } catch (e: any) {
-      return json({ ok: false, error: String(e?.message || e) }, headers, 500);
-    }
+
+      } catch (e) {
+  return json({ ok: false, error: String((e as any)?.message || e) }, headers, 500);
+}
   },
 };
-
 
 
 // =====================================================
@@ -1352,8 +1483,8 @@ function cors(req: Request) {
 
   const allowOrigin = allowed.has(origin) ? origin : "https://fur-fusion.com";
 
-  return {
-    "Access-Control-Allow-Origin": allowOrigin,
+   return {
+    "Access-Control-Allow-Origin": origin || "*",
     "Access-Control-Allow-Headers":
       "Content-Type, Authorization, Stripe-Signature, CF-Access-Jwt-Assertion",
     "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
